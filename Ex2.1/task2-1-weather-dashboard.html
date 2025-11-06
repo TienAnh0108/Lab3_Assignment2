@@ -148,48 +148,176 @@
     const errorMessageDiv = document.getElementById('errorMessage');
     const recentSearchesDiv = document.getElementById('recentSearches');
 
-    async function fetchWeather(city) {
-      // TODO: Fetch current weather from API
-    }
-
-    async function fetchForecast(city) {
-      // TODO: Fetch 5-day forecast from API
-    }
-
-    function displayWeather(data) {
-      // TODO: Display current weather
-      // data.main.temp, data.weather[0].description
-      // data.main.humidity, data.wind.speed
-    }
-
-    function displayForecast(data) {
-      // TODO: Display forecast (filter for one per day)
-    }
-
-    async function searchWeather() {
-      // TODO: Get city input and fetch weather
-      // TODO: Handle loading state
-      // TODO: Handle errors
-      // TODO: Save to recent searches
-    }
-
-    function saveRecentSearch(city) {
-      // TODO: Save to localStorage (max 5 cities)
-    }
-
-    function loadRecentSearches() {
-      // TODO: Load and display recent searches
+    function clearDisplay(message = 'Loading...') {
+      weatherDisplay.innerHTML = `<div class="loading">${message}</div>`;
+      forecastDisplay.innerHTML = '';
+      clearError();
     }
 
     function showError(message) {
-      // TODO: Display error message
+      errorMessageDiv.className = 'error';
+      errorMessageDiv.innerHTML = message;
+      weatherDisplay.innerHTML = '';
+      forecastDisplay.innerHTML = '';
     }
 
     function clearError() {
-      // TODO: Clear error message
+      errorMessageDiv.innerHTML = '';
     }
 
-    // Initialize
+    async function fetchWeather(city) {
+      const url = `${WEATHER_URL}?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric&lang=en`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          if (response.status === 404) {
+            throw new Error(`City not found: ${city}. Please check the name.`);
+          }
+          throw new Error(`HTTP Error: ${response.status}.`);
+        }
+        return await response.json();
+      } catch (error) {
+        throw error;
+      }
+    }
+
+    async function fetchForecast(city) {
+      const url = `${FORECAST_URL}?q=${encodeURIComponent(city)}&appid=${API_KEY}&units=metric&lang=en`;
+      try {
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error(`HTTP Error: ${response.status} while fetching forecast.`);
+        }
+        return await response.json();
+      } catch (error) {
+        throw error;
+      }
+    }
+
+    function displayWeather(data) {
+      const tempC = Math.round(data.main.temp);
+      const description = data.weather[0].description;
+      const iconCode = data.weather[0].icon;
+      const iconUrl = `https://openweathermap.org/img/wn/${iconCode}@2x.png`;
+
+      weatherDisplay.innerHTML = `
+        <div class="weather-card">
+            <h2>${data.name}, ${data.sys.country}</h2>
+            <div class="current-weather">
+                <div>
+                    <span class="temp-display">${tempC}°C</span>
+                    <p style="text-transform: capitalize;">${description}</p>
+                </div>
+                <div>
+                    <img src="${iconUrl}" alt="${description}" width="100">
+                </div>
+            </div>
+            <hr style="margin: 15px 0;">
+            <p>Humidity: <strong>${data.main.humidity}%</strong></p>
+            <p>Wind Speed: <strong>${data.wind.speed} m/s</strong></p>
+            <p>Feels like: <strong>${Math.round(data.main.feels_like)}°C</strong></p>
+        </div>
+    `;
+    }
+
+    function displayForecast(data) {
+      const forecastList = data.list;
+      const dailyForecasts = {};
+      const today = new Date().toLocaleDateString('en-US');
+
+      for (let item of forecastList) {
+        const date = new Date(item.dt * 1000);
+        const dateStr = date.toLocaleDateString('en-US');
+
+        if (dateStr === today) continue;
+
+        if (!dailyForecasts[dateStr] && date.getHours() >= 10 && date.getHours() <= 14) {
+          dailyForecasts[dateStr] = item;
+        } else if (!dailyForecasts[dateStr]) {
+          dailyForecasts[dateStr] = item;
+        }
+      }
+
+      const forecastCards = Object.values(dailyForecasts).slice(0, 5).map(item => {
+        const date = new Date(item.dt * 1000);
+        const dayName = date.toLocaleDateString('en-US', { weekday: 'short' });
+        const iconCode = item.weather[0].icon;
+        const temp = Math.round(item.main.temp);
+
+        return `
+            <div class="forecast-item">
+                <p><strong>${dayName}</strong></p>
+                <img src="https://openweathermap.org/img/wn/${iconCode}.png" alt="Icon">
+                <p>${temp}°C</p>
+                <p style="font-size: 0.8em; color: #6c757d; text-transform: capitalize;">${item.weather[0].description}</p>
+            </div>
+        `;
+      }).join('');
+
+      forecastDisplay.innerHTML = `
+        <div class="weather-card">
+            <h3>5-Day Forecast</h3>
+            <div class="forecast-grid">
+                ${forecastCards}
+            </div>
+        </div>
+    `;
+    }
+
+    function saveRecentSearch(city) {
+      const cityClean = city.trim();
+      let searches = JSON.parse(localStorage.getItem('recentCities') || '[]');
+
+      searches = searches.filter(c => c.toLowerCase() !== cityClean.toLowerCase());
+
+      searches.unshift(cityClean);
+
+      if (searches.length > 5) {
+        searches.pop();
+      }
+
+      localStorage.setItem('recentCities', JSON.stringify(searches));
+      loadRecentSearches();
+    }
+
+    function loadRecentSearches() {
+      let searches = JSON.parse(localStorage.getItem('recentCities') || '[]');
+      recentSearchesDiv.innerHTML = '';
+
+      searches.forEach(city => {
+        const cityElement = document.createElement('span');
+        cityElement.className = 'recent-city';
+        cityElement.textContent = city;
+        cityElement.onclick = () => {
+          cityInput.value = city;
+          searchWeather();
+        };
+        recentSearchesDiv.appendChild(cityElement);
+      });
+    }
+
+    async function searchWeather() {
+      const city = cityInput.value.trim();
+      if (!city) {
+        showError('Please enter a city name.');
+        return;
+      }
+
+      clearDisplay();
+
+      try {
+        const weatherData = await fetchWeather(city);
+        displayWeather(weatherData);
+
+        const forecastData = await fetchForecast(city);
+        displayForecast(forecastData);
+
+        saveRecentSearch(city);
+
+      } catch (error) {
+        showError(error.message);
+      }
+    }
     loadRecentSearches();
   </script>
 </body>
